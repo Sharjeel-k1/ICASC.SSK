@@ -1,235 +1,543 @@
-(ns ICA1.ICA1
-  (:require [clojure.set :as set]))
+(ns ICA1.ICA1)
+;; Defining the graph structure
+
+(defrecord Graph [vertices edges])
 
 
-(def ^:dynamic *departure* nil)
-(def ^:dynamic *destination* nil)
-(def ^:dynamic *trip-type* nil)
-; ------ GRAPH RELATED
 
-; Creates an empty graph, which is represented as an atom that contains an empty map.
 (defn make-graph []
-  (atom {}))
 
-; Adds a new vertex to the graph. The vertex is represented as a map that includes its coordinates and edges.
-; If a vertex with the same name already exists in the graph, it throws an IllegalArgumentException.
-(defn graph-add-vertex! [g name lat lon]
-  (if (contains? @g name)
-    (throw (IllegalArgumentException. (str "Vertex with name " name " already exists")))
-    (swap! g assoc name {:coordinates [lat lon] :edges {}})))
-
-; Adds a new edge to the graph, connecting two vertices. The edge is represented as a map that includes its name and price.
-; If either vertex does not exist in the graph, or if the price is not provided, it throws an IllegalArgumentException.
-(defn graph-add-edge! [g from to edge-name price]
-  (let [from-vertex (get @g from)
-        to-vertex (get @g to)]
-    (when (or (nil? from-vertex) (nil? to-vertex))
-      (throw (IllegalArgumentException. (str "Either vertex " from " or " to " not found in graph"))))
-    (when (nil? price)
-      (throw (IllegalArgumentException. "Price must be provided")))
-    (swap! g assoc from (assoc from-vertex :edges (assoc (:edges from-vertex) to {:name edge-name :price price})))
-    (swap! g assoc to (assoc to-vertex :edges (assoc (:edges to-vertex) from {:name edge-name :price price})))
-    ))
+  (Graph. (atom {}) (atom {})))
 
 
-; Returns a specific vertex in the graph. If the vertex does not exist, it returns nil.
-(defn graph-find-vertex [g vertex-name]
-  (let [graph @g
-        vertex (get graph vertex-name)]
-    vertex))
 
-; ------- VERTEX-price RELATED
+;; Defining vertex structure
 
-; Creates an empty vertex price map, which is represented as an atom that contains an empty map.
-(defn make-vertex-price []
-  (atom {}))
-
-; Sets the price for a specified vertex in the vertex price map.
-(defn vertex-price-set! [vd name price]
-  (swap! vd assoc name price))
-
-; Gets the price for a specified vertex from the vertex price map. If the vertex does not exist, it returns nil.
-(defn vertex-price-get [vd name]
-  (get @vd name))
-
-; ------- VERTEX-SET RELATED
-
-; Creates an empty vertex set, which is represented as an atom that contains an empty set.
-(defn make-vertex-set []
-  (atom #{}))
-
-; Adds a vertex to the vertex set.
-(defn vertex-set-add! [vs name]
-  (swap! vs conj name))
-
-; Deletes a vertex from the vertex set.
-(defn vertex-set-del! [vs name]
-  (swap! vs disj name))
-
-; Checks if a vertex is in the vertex set. Returns true if the vertex is in the set, and false otherwise.
-(defn vertex-set-get [vs name]
-  (contains? @vs name))
-
-; Adds all vertices from the given graph to the vertex set.
-(defn vertex-set-add-all! [vs g]
-  (doseq [v (keys @g)]
-    (vertex-set-add! vs v)))
-
-; ------- RELATED TO ALL ABOVE
-
-; This function finds the vertex with the minimum price value that hasn't been completed yet.
-(defn minimum-price-vertex [g vd vs]
-  (let [dist-keys (keys @vd)  ; get the keys (vertex names) from the vertex price map
-        not-completed-keys (set/intersection (set dist-keys) @vs)]  ; find the intersection of dist-keys and the not-completed vertex set
-    (if (empty? not-completed-keys)  ; if there are no more vertices to process
-      nil  ; return nil
-      (apply min-key (fn [k] (get @vd k)) not-completed-keys))))  ; otherwise, find the vertex with the minimum price value that hasn't been completed yet
-
-; This function finds all shortest paths from start to destination.
-(defn get-shortest-paths [g vertex-price start destination edge-price-function]
-  (let [paths (atom [])]  ; create an atom to hold the paths
-    (defn backtrack [current-vertex path]  ; define a recursive function to backtrack from the destination to the start
-      (let [current-price (vertex-price-get vertex-price current-vertex)
-            current-vertex-data (graph-find-vertex g current-vertex)
-            edges (:edges current-vertex-data)
-            previous-vertices (filter (fn [[vertex-name _]] (= (- current-price (edge-price-function current-vertex-data vertex-name)) (vertex-price-get vertex-price vertex-name))) edges)]
-        (if (not= current-vertex start)
-          (doseq [[previous-vertex-name _] previous-vertices]  ; for each previous vertex
-            (backtrack previous-vertex-name (cons previous-vertex-name path)))  ; recursively call backtrack with the current vertex and path
-          (swap! paths conj path))))  ; when the start vertex is reached, add the path to the paths atom
-    (backtrack destination [destination])  ; start the backtrack from the destination
-    @paths))  ; return the contents of the paths atom
-
-; Prints paths
-(defn print-paths-vertically [paths g edge-price-function]
-  (doseq [[i path] (map vector (range 1 (inc (count paths))) paths)]  ; for each path with its index
-    (println (str " Path " i ":"))  ; print a header with the path number
-    (doseq [v (partition 2 1 path)]  ; for each pair of vertices in the path
-      (let [[from to] v
-            edge-data (get (:edges (get @g from)) to)
-            edge-name (:name edge-data)
-            edge-price (edge-price-function (get @g from) to)]
-        (println (str "  From " from " take " edge-name " with price " edge-price " to " to))))  ; print the vertex, edge name and price
-    (println)))  ; print a newline
-
-; ------- GRAPH DATA GOES HERE
+(defrecord Vertex [label neighbors])
 
 
+
+(defn make-vertex [label]
+
+  (Vertex. label (atom '())))
+
+
+
+(defn graph-add-vertex! [graph label]
+
+  (let [vertices (:vertices graph)
+
+        new-vertex (make-vertex label)]
+
+    (swap! vertices assoc label new-vertex))
+
+  nil)
+
+
+
+;; Edge structure definition
+
+(defrecord Edge [from to label weight])
+
+
+
+(defn make-edge [from to label weight]
+
+  (Edge. from to label weight))
+
+
+
+(defn graph-edge-key [from to]
+
+  (sort (list from to)))
+
+
+
+(defn graph-add-edge! [graph from to label weight]
+
+  (let [vertices (:vertices graph)
+
+        from-vertex (get @vertices from)
+
+        to-vertex (get @vertices to)
+
+        from-vertex-neighbors @(:neighbors from-vertex)
+
+        to-vertex-neighbors @(:neighbors to-vertex)
+
+        new-edge (make-edge from to label weight)
+
+        new-edge-key (graph-edge-key from to)]
+
+    (swap! (:edges graph) assoc new-edge-key new-edge)
+
+    (reset! (:neighbors from-vertex) (conj from-vertex-neighbors to))
+
+    (reset! (:neighbors to-vertex) (conj to-vertex-neighbors from))))
+
+
+
+;; Implemented functions to handle the graph
+
+(defn graph-has-vertex? [graph label]
+
+  (contains? @(:vertices graph) label))
+
+
+
+(defn graph-has-edge? [graph from to]
+
+  (contains? @(:edges graph) (graph-edge-key from to)))
+
+
+
+(defn get-edge-weight [graph from to]
+
+  (:weight (get @(:edges graph) (graph-edge-key from to))))
+
+
+
+;; Define  graph data
 
 (def g (make-graph))
 
 
-(graph-add-vertex! g "Krakov" 50.0647 19.9450)
-(graph-add-vertex! g "Hamburg" 53.5488 9.9872)
-(graph-add-vertex! g "Warsaw" 52.2297 21.0122)
-(graph-add-vertex! g "Berlin" 52.5200 13.4050)
-(graph-add-vertex! g "Prague" 50.0755 14.4378)
-(graph-add-vertex! g "Munich" 48.1351 11.5820)
-(graph-add-vertex! g "Vienna" 48.2082 16.3719)
-(graph-add-vertex! g "Innsbruck" 47.2692 11.4041)
-(graph-add-vertex! g "Budapest" 47.4979 19.0402)
-(graph-add-vertex! g "Zagreb" 45.8150 15.9819)
-(graph-add-vertex! g "Rome" 41.9028 12.4964)
-(graph-add-vertex! g "Napoli" 40.8518 14.2681)
-(graph-add-vertex! g "Rijeka" 45.3271 14.4422)
-(graph-add-vertex! g "Brno" 49.1951 16.6068)
 
-(graph-add-edge! g "Krakov" "Warsaw" "E40" 100)
-(graph-add-edge! g "Warsaw" "Berlin" "E41" 300)
-(graph-add-edge! g "Hamburg" "Berlin" "E42" 100)
-(graph-add-edge! g "Prague" "Berlin" "E43" 200)
-(graph-add-edge! g "Munich" "Berlin" "E44" 100)
-(graph-add-edge! g "Munich" "Innsbruck" "E45" 100)
-(graph-add-edge! g "Vienna" "Innsbruck" "E46" 200)
-(graph-add-edge! g "Vienna" "Budapest" "E47" 300)
-(graph-add-edge! g "Warsaw" "Budapest" "E48" 400)
-(graph-add-edge! g "Zagreb" "Budapest" "E49" 200)
-(graph-add-edge! g "Vienna" "Rome" "E50" 400)
-(graph-add-edge! g "Napoli" "Rome" "E51" 200)
-(graph-add-edge! g "Napoli" "Rijeka" "E52" 100)
-(graph-add-edge! g "Vienna" "Prague" "E53" 200)
-(graph-add-edge! g "Vienna" "Rijeka" "E54" 400)
-(graph-add-edge! g "Rijeka" "Zagreb" "E55" 100)
-(graph-add-edge! g "Vienna" "Zagreb" "E56" 300)
-(graph-add-edge! g "Munich" "Zagreb" "E57" 400)
-(graph-add-edge! g "Innsbruck" "Rome" "E58" 400)
-(graph-add-edge! g "Budapest" "Rome" "E59" 400)
-(graph-add-edge! g "Budapest" "Berlin" "E60" 300)
-(graph-add-edge! g "Prague" "Brno" "E61" 100)
-(graph-add-edge! g "Prague" "Budapest" "E62" 300)
+;; Adding vertices and edges manually
 
-; For search engine get the real price of the edge from vertex structure
-(defn search-edge-price-function [vertex adjacent-vertex-name]
-  (:price (get (:edges vertex) adjacent-vertex-name)))
+(doseq [data [["Krakov" "Warsaw" "100"]
 
-; This function performs the Dijkstra's algorithm to find the shortest path(s) from the start to the destination.
-(defn shortest-path [g start destination edge-price-function max-price max-edges]
-  (when-not (contains? @g start)
-    (throw (IllegalArgumentException. (str "Start vertex " start " not found in graph"))))
-  (when-not (contains? @g destination)
-    (throw (IllegalArgumentException. (str "Destination vertex " destination " not found in graph"))))
-  (let [vertex-price (make-vertex-price)
-        completed-vertex-set (make-vertex-set)
-        not-completed-vertex-set (make-vertex-set)
-        path-doesnt-exist (atom nil)
-        shortest-path-found (atom nil)]
-    (vertex-price-set! vertex-price start 0)
-    (vertex-set-add-all! not-completed-vertex-set g)
-    (loop []
-      (let [vertex-a-name (minimum-price-vertex g vertex-price not-completed-vertex-set)
-            vertex-a (graph-find-vertex g vertex-a-name)
-            adjacent-vertex-names (keys (:edges vertex-a))
-            vertex-a-price (vertex-price-get vertex-price vertex-a-name)
-            destination-price (vertex-price-get vertex-price destination)
-            destination-not-completed (vertex-set-get not-completed-vertex-set destination)]
-        (when (and (nil? vertex-a-name) destination-not-completed)
-          (reset! path-doesnt-exist true))
+              ["Hamburg" "Berlin" "100"]
 
-        (when (and (nil? @path-doesnt-exist) (or (nil? vertex-a-name) (and (some? destination-price) (< destination-price vertex-a-price))))
-          (reset! shortest-path-found true))
+              ["Warsaw" "Berlin" "300"]
 
-        (when (and (nil? @path-doesnt-exist) (nil? @shortest-path-found))
-          (doseq [adjacent-vertex-name adjacent-vertex-names]
-            (let [adjacent-vertex (graph-find-vertex g adjacent-vertex-name)
-                  adjacent-vertex-price (vertex-price-get vertex-price adjacent-vertex-name)
-                  adjacent-vertex-edge-price (edge-price-function vertex-a adjacent-vertex-name)
-                  vertex-a-plus-edge-price (+ vertex-a-price adjacent-vertex-edge-price)]
-              (when (or (nil? adjacent-vertex-price) (> adjacent-vertex-price vertex-a-plus-edge-price))
-                (vertex-price-set! vertex-price adjacent-vertex-name vertex-a-plus-edge-price)
-                (vertex-set-add! not-completed-vertex-set adjacent-vertex-name)
-                (vertex-set-del! completed-vertex-set adjacent-vertex-name))))
-          (vertex-set-add! completed-vertex-set vertex-a-name)
-          (vertex-set-del! not-completed-vertex-set vertex-a-name)))
+              ["Prague" "Berlin" "200"]
 
-      (if (and (nil? @path-doesnt-exist) (nil? @shortest-path-found))
-        (recur)))
-    (when (some? @path-doesnt-exist)
-      (println (str "Path from " start " to " destination " doesn't exist")))
-    (when (some? @shortest-path-found)
-      (println (str "Shortest path(s) from " start " to " destination " found with price:" (vertex-price-get vertex-price destination)))
-      (println "Shortest path(s):")
-      (print-paths-vertically (get-shortest-paths g vertex-price start destination edge-price-function) g edge-price-function))))
+              ["Munich" "Berlin" "100"]
+
+              ["Munich" "Innsbruck" "100"]
+
+              ["Vienna" "Innsbruck" "200"]
+
+              ["Vienna" "Budapest" "300"]
+
+              ["Warsaw" "Budapest" "400"]
+
+              ["Zagreb" "Budapest" "200"]
+
+              ["Vienna" "Rome" "400"]
+
+              ["Napoli" "Rome" "200"]
+
+              ["Napoli" "Rijeka" "100"]
+
+              ["Vienna" "Prague" "200"]
+
+              ["Vienna" "Rijeka" "400"]
+
+              ["Rijeka" "Zagreb" "100"]
+
+              ["Vienna" "Zagreb" "300"]
+
+              ["Munich" "Zagreb" "400"]
+
+              ["Innsbruck" "Rome" "400"]
+
+              ["Budapest" "Rome" "400"]
+
+              ["Budapest" "Berlin" "300"]
+
+              ["Prague" "Brno" "100"]
+
+              ["Prague" "Budapest" "300"]]]
+
+  (let [[from to weight] data]
+
+    (when (not (graph-has-vertex? g from))
+
+      (graph-add-vertex! g from))
+
+    (when (not (graph-has-vertex? g to))
+
+      (graph-add-vertex! g to))
+
+    (graph-add-edge! g from to (str from " " to " " weight) (Integer/parseInt weight))))
 
 
-; -------- ASKS FOR start, destination, and trip type
-(defn -main []
-  (println "Enter departure city:")
-  (def ^:dynamic *departure* (read-line))
 
-  (println "Enter destination city:")
-  (def ^:dynamic *destination* (read-line))
+;; Printing vertices and edges
 
-  (println "Enter trip type (family/organized):")
-  (def ^:dynamic *trip-type* (read-line))
+;(doseq [vertex @(:vertices g)]
 
-  (cond
-    (= *trip-type* "family")
-    (shortest-path g *departure* *destination* search-edge-price-function 700 2)
+;  (println vertex))
 
-    (= *trip-type* "organized")
-    (shortest-path g *departure* *destination* search-edge-price-function 1000 3)
+;
 
-    :else
-    (println "Invalid trip type. Please enter 'family' or 'organized'.")))
+;(doseq [edge @(:edges g)]
 
-(-main)
+;  (println edge))
+
+
+
+(defn graph-get-neighbors [graph label]
+
+  (let [vertex (get @(:vertices graph) label)]
+
+    (if vertex
+
+      @(:neighbors vertex)
+
+      (do (println (str " No vertex found for label " label))
+
+          []))))
+
+
+
+(defn check-constraints [cost budget path max-flights]
+
+  (and (<= cost budget)
+
+       (< (- (count path) 1) max-flights)))
+
+
+
+(defn bfs-find-plans [graph start-label end-city-spec budget max-flights]
+
+  (let [start-cost (get-edge-weight graph start-label start-label)
+
+        queue (ref [[{:vertex start-label :cost (or start-cost 0)}]])
+
+        plans (atom [])]
+
+    (while (not (empty? @queue))
+
+      (let [path (first @queue)]
+
+        (dosync
+
+          (ref-set queue (rest @queue)))
+
+        (let [current-vertex (-> path last :vertex)
+
+              current-cost (-> path last :cost)]
+
+          (when (and (and (string? end-city-spec) (= current-vertex end-city-spec))
+
+                     (check-constraints current-cost budget path max-flights))
+
+            (swap! plans conj {:path (map (fn [p] {:city (:vertex p) :cost (:cost p)}) path) :total-cost current-cost}))
+
+          (when (not (= current-vertex end-city-spec))
+
+            (let [neighbors (graph-get-neighbors graph current-vertex)]
+
+              (doseq [neighbor neighbors]
+
+                (let [edge-cost (get-edge-weight graph current-vertex neighbor)
+
+                      total-cost (+ current-cost edge-cost)]
+
+                  (when (and (not (some #(= neighbor (:vertex %)) path))
+
+                             (check-constraints total-cost budget path max-flights))
+
+                    (dosync
+
+                      (alter queue conj (conj path {:vertex neighbor :cost total-cost})))))))))))
+
+    @plans))
+
+
+
+(defn sort-plans [plans]
+
+  (sort-by (juxt (comp - :total-cost) (comp count :path)) plans))
+
+
+
+(defn remove-duplicate-paths [plans]
+
+  (let [seen-flights (atom #{})]
+
+    (filter (fn [plan]
+
+              (let [num-flights (- (count (:path plan)) 1)]
+
+                (if (contains? @seen-flights num-flights)
+
+                  false
+
+                  (do
+
+                    (swap! seen-flights conj num-flights)
+
+                    true))))
+
+            plans)))
+
+
+
+(defn find-and-sort-plans [graph start-label end-city-name budget max-flights client-type]
+
+  (let [client-budget (case client-type
+
+                        :family 700
+
+                        :group 1000)
+
+        raw-plans (bfs-find-plans graph start-label end-city-name client-budget max-flights)]
+
+    (let [filtered-plans (filter
+
+                           (fn [plan]
+
+                             (and (<= (:total-cost plan) client-budget)
+
+                                  (< (- (count (:path plan)) 1) max-flights)))
+
+                           raw-plans)]
+
+      (let [sorted-plans (sort-plans filtered-plans)
+
+            distinct-plans (remove-duplicate-paths sorted-plans)
+
+            most-expensive-plan (first distinct-plans)
+
+            cheapest-plan (last distinct-plans)]
+
+        (if (= most-expensive-plan cheapest-plan)
+
+          [most-expensive-plan]
+
+          [most-expensive-plan cheapest-plan])))))
+
+
+
+
+
+(defn format-path [path]
+
+  (let [formatted-path (map (fn [{:keys [city cost]}]
+
+                              (str city (if (zero? cost) "" (str " (" cost ")"))))
+
+                            path)]
+
+    (clojure.string/join " - " formatted-path)))
+
+
+
+
+
+(defn extract-city-from-label [label]
+
+  (last (clojure.string/split label #" ")))
+
+
+
+(defn display-option [index path total-cost]
+
+  (let [flight-path (->> path
+
+                         (map :label)
+
+                         (map extract-city-from-label)
+
+                         (remove #{"-"})
+
+                         (clojure.string/join " - "))
+
+        flight-costs (->> path
+
+                          (map :weight)
+
+                          (remove (fn [w] (= w "-")))
+
+                          (clojure.string/join " + "))]
+
+    (println (str "Option"":"))
+
+    (println (str flight-path ". " flight-costs " = " total-cost))))
+
+
+
+
+
+(defn reverse-engineer-costs [path]
+
+  (loop [remaining-path (reverse path)
+
+         last-cost (-> path last :cost)
+
+         result []]
+
+    (if (empty? remaining-path)
+
+      (reverse result)
+
+      (let [current-cost (or (-> remaining-path first :cost) 0)
+
+            calculated-cost (- last-cost current-cost)]
+
+        (recur (rest remaining-path) current-cost
+
+               (conj result (assoc (first remaining-path) :cost calculated-cost)))))))
+
+
+
+(defn print-reversed-plans [plans]
+
+  (doseq [plan plans]
+
+    (let [{:keys [path total-cost]} plan
+
+          reversed-path (reverse-engineer-costs path)
+
+          formatted-path (format-path reversed-path)]
+
+      (println "Path: " formatted-path)
+
+      (println "Total Cost: " total-cost))))
+
+
+
+(defn get-all-cities [graph]
+
+  (keys @(:vertices graph)))
+
+
+
+(defn choose-city [prompt graph]
+
+  (let [cities (get-all-cities graph)]
+
+    (println prompt)
+
+    (doseq [[idx city] (map vector (range 1 (inc (count cities))) cities)]
+
+      (println (str idx ". " city)))
+
+    (let [choice-str (read-line)
+
+          choice (if (re-matches #"\d+" choice-str)
+
+                   (Integer/parseInt choice-str) 0)]
+
+      (cond (and (>= choice 1) (<= choice (count cities)))
+
+            (nth cities (dec choice))
+
+            (some #{choice-str} cities)
+
+            choice-str
+
+            :else (do
+
+                    (println "Invalid choice. Please choose again.")
+
+                    (recur prompt graph))))))
+
+
+
+(defn choose-client-type []
+
+  (println "Enter your client type: family/group")
+
+  (let [choice (read-line)]
+
+    (condp = choice
+
+      "family" :family
+
+      "group" :group
+
+      (do (println "Invalid choice. Please choose again.")
+
+          (recur)))))
+
+
+
+(defn print-option [plan index]
+
+  (let [{:keys [path total-cost]} plan
+
+        flight-path (->> path
+
+                         (map :label)
+
+                         (clojure.string/join " - "))
+
+        flight-costs (->> path
+
+                          (map :weight)
+
+                          (clojure.string/join " + "))]
+
+    (println (str "Option"":"))
+
+    (println (str flight-path ". " flight-costs " = " total-cost))))
+
+
+
+(defn display-option [index path total-cost graph]
+  (let [formatted-path (map (fn [{:keys [city cost]}]
+                              (let [city-name (extract-city-from-label city)]
+                                (str city-name (if (zero? cost) "" (str " (" cost ")")))))
+                            path)]
+
+    (println (str "Option" ":"))
+
+    (let [flight-path (->> formatted-path
+                           (remove #{"-"})
+                           (clojure.string/join " - "))]
+      (if (empty? formatted-path)
+        (println "No flight plan exists between these two cities meeting your requirements")
+        (println (str "The plan is: " flight-path " with a total cost of " total-cost))))))
+
+
+
+(defn print-option [plan index graph]
+  (let [{:keys [path total-cost]} plan
+        reversed-path (reverse-engineer-costs path)
+        formatted-path (format-path reversed-path)]
+
+    (when (not (empty? formatted-path))
+      (println (str "Option "":"))
+      (let [flight-path (->> formatted-path
+                             (map extract-city-from-label)
+                             (remove #{"-"})
+                             (clojure.string/join " - "))]
+        (println (str "The plan is: " flight-path " with a total cost of " total-cost))))))
+
+(defn display-options [plans graph]
+  (if (seq plans)
+    (doseq [plan-info (map vector plans (range 1 (inc (count plans))))]
+      (apply print-option plan-info graph))
+    (println "Sorry, but no flight plan was found between these two cities meeting your requirements.")))
+(defn get-user-input [graph]
+  (let [start-city (choose-city "Enter the starting city:" graph)
+        end-city (choose-city "Enter the destination city:" graph)
+        client-type (choose-client-type)]
+    [start-city end-city client-type]))
+
+(defn main [g]
+  (when (not (empty? @(:vertices g)))
+    (let [[start-city end-city client-type] (get-user-input g)
+          plans (find-and-sort-plans g start-city end-city 1000 3 client-type)]
+      (if (seq plans)
+        (let [second-price-plan (first (sort-by :total-cost plans))
+              highest-price-plan (second (sort-by :total-cost plans))
+              other-plans (rest (sort-by :total-cost plans))]
+          (println "\nPlan:")
+          (if (seq other-plans)
+            (do
+              (display-option 2 (:path highest-price-plan) (:total-cost highest-price-plan) g)
+              (display-options other-plans g))
+            (println " Option: Unfortunately, only one trip plan meets your requirements."))
+          (display-option 1 (:path second-price-plan) (:total-cost second-price-plan) g))
+        ;; No need to print "Sorry..." text here
+        ))))
+
+
+
+(main g)
